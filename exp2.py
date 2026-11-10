@@ -3,13 +3,11 @@ import ollama
 import ast
 import re
 
-# 1. REAL CODE DATASET (10 SAMPLES)
-
+# Dataset
 real_code_dataset = [
 """def bubble_sort(arr):
-    n = len(arr)
-    for i in range(n):
-        for j in range(0, n-i-1):
+    for i in range(len(arr)):
+        for j in range(len(arr)-i-1):
             if arr[j] > arr[j+1]:
                 arr[j], arr[j+1] = arr[j+1], arr[j]
     return arr""",
@@ -39,17 +37,8 @@ real_code_dataset = [
     return arr""",
 
 """def bubble_sort(arr):
-    n = len(arr)
-    for i in range(n-1, 0, -1):
+    for i in range(len(arr)-1, 0, -1):
         for j in range(i):
-            if arr[j] > arr[j+1]:
-                arr[j], arr[j+1] = arr[j+1], arr[j]
-    return arr""",
-
-"""def bubble_sort(arr):
-    n = len(arr)
-    for i in range(n):
-        for j in range(n-i-1):
             if arr[j] > arr[j+1]:
                 arr[j], arr[j+1] = arr[j+1], arr[j]
     return arr""",
@@ -91,193 +80,125 @@ real_code_dataset = [
                 arr[j], arr[j+1] = arr[j+1], arr[j]
             j += 1
         i += 1
+    return arr""",
+
+"""def bubble_sort(arr):
+    n = len(arr)
+    for i in range(n):
+        for j in range(n-i-1):
+            if arr[j] > arr[j+1]:
+                arr[j], arr[j+1] = arr[j+1], arr[j]
     return arr"""
 ]
 
 
-# 2. GENERATE CODE USING CODEGEMMA
-
-def generate_code():
-
-    prompt = """# Write ONLY a Python function named bubble_sort(arr).
+# Generate Code
+prompt = """# Write ONLY a Python function named bubble_sort(arr).
 # Sort in ascending order using Bubble Sort.
 # Return the sorted list.
 
 def bubble_sort(arr):
 """
 
-    response = ollama.generate(
-        model="codegemma:2b",
-        prompt=prompt,
-        options={
-            "temperature": 0,
-            "num_predict": 150,
-            "stop": [
-                "# Write",
-                "def insertion_sort",
-                "def selection_sort"
-            ]
-        }
+response = ollama.generate(
+    model="codegemma:2b",
+    prompt=prompt,
+    options={
+        "temperature": 0,
+        "num_predict": 150,
+        "stop": ["# Write", "def insertion_sort", "def selection_sort"]
+    }
+)
+
+code = "def bubble_sort(arr):\n" + response["response"]
+
+# Extract the generated function
+try:
+    tree = ast.parse(code)
+    code = ast.get_source_segment(
+        code, tree.body[0]
     )
+except:
+    code = ""
 
-    code = "def bubble_sort(arr):\n" + response["response"]
-
-    try:
-        tree = ast.parse(code)
-
-        for node in tree.body:
-            if isinstance(node, ast.FunctionDef):
-                if node.name == "bubble_sort":
-                    return ast.get_source_segment(code, node)
-
-        return ""
-
-    except SyntaxError:
-        return ""
+print("GENERATED CODE")
+print(code)
 
 
-# 3. CHECK SYNTAX
+# Test Cases
+tests = [
+    ([5, 3, 8, 4, 2], [2, 3, 4, 5, 8]),
+    ([10, 1, 7, 3], [1, 3, 7, 10]),
+    ([5, 5, 2, 1], [1, 2, 5, 5]),
+    ([9, 8, 7, 6], [6, 7, 8, 9]),
+    ([1], [1]),
+    ([], [])
+]
 
-def check_syntax(code):
+
+# Discriminator
+def discriminator(code):
+
     try:
         ast.parse(code)
-        return True
-    except SyntaxError:
-        return False
+        syntax = True
+    except:
+        syntax = False
 
-
-# 4. TEST FUNCTIONALITY
-
-def test_code(code):
+    if not syntax:
+        return 0, 0, 0, 0
 
     namespace = {}
 
-    tests = [
-        ([5, 3, 8, 4, 2], [2, 3, 4, 5, 8]),
-        ([10, 1, 7, 3], [1, 3, 7, 10]),
-        ([5, 5, 2, 1], [1, 2, 5, 5]),
-        ([9, 8, 7, 6], [6, 7, 8, 9]),
-        ([1], [1]),
-        ([], [])
-    ]
-
     try:
         exec(code, namespace)
-        bubble_sort = namespace["bubble_sort"]
+        function = namespace["bubble_sort"]
+
+        passed = 0
 
         for data, expected in tests:
-            if bubble_sort(data.copy()) != expected:
-                return False
+            if function(data.copy()) == expected:
+                passed += 1
 
-        return True
+        functional = passed == len(tests)
 
-    except Exception:
-        return False
+    except:
+        functional = False
 
-
-# 5. CHECK BUBBLE SORT ALGORITHM
-
-def check_algorithm(code):
-
-    code = code.lower()
-
-    return (
-        "def bubble_sort" in code
-        and ("for" in code or "while" in code)
-        and "if" in code
-        and ">" in code
-        and ".sort(" not in code
-        and "sorted(" not in code
-    )
-
-
-# 6. CALCULATE SIMILARITY
-
-def calculate_similarity(code):
+    algorithm = (
+        "for" in code or "while" in code
+    ) and "if" in code and ">" in code and "sorted(" not in code and ".sort(" not in code
 
     tokens = set(re.findall(r"[a-zA-Z_]+", code.lower()))
 
-    if not tokens:
-        return 0
-
-    best = 0
+    similarity = 0
 
     for real_code in real_code_dataset:
+        real_tokens = set(re.findall(r"[a-zA-Z_]+", real_code.lower()))
 
-        real_tokens = set(
-            re.findall(r"[a-zA-Z_]+", real_code.lower())
-        )
+        if tokens | real_tokens:
+            score = len(tokens & real_tokens) / len(tokens | real_tokens)
+            similarity = max(similarity, score)
 
-        score = len(tokens & real_tokens) / len(tokens | real_tokens)
+    similarity = round(similarity * 100, 2)
 
-        best = max(best, score)
+    final_score = 20 + functional * 40 + algorithm * 20 + similarity * 0.20
 
-    return round(best * 100, 2)
-
-
-# 7. DISCRIMINATOR
-
-def discriminator(code):
-
-    syntax = check_syntax(code)
-
-    if not syntax:
-        return {
-            "syntax": False,
-            "functional": False,
-            "algorithm": False,
-            "similarity": 0,
-            "score": 0
-        }
-
-    functional = test_code(code)
-    algorithm = check_algorithm(code)
-    similarity = calculate_similarity(code)
-
-    score = (
-        20
-        + functional * 40
-        + algorithm * 20
-        + similarity * 0.20
-    )
-
-    return {
-        "syntax": syntax,
-        "functional": functional,
-        "algorithm": algorithm,
-        "similarity": similarity,
-        "score": round(score, 2)
-    }
+    return functional, algorithm, similarity, round(final_score, 2)
 
 
-# 8. MAIN PROGRAM
+# Final Result
+if code:
+    functional, algorithm, similarity, score = discriminator(code)
 
-print("CODEGEMMA - BUBBLE SORT GENERATOR")
-print("=" * 45)
+    print("\nDISCRIMINATOR RESULT")
+    print("Syntax: True")
+    print("Functional:", functional)
+    print("Algorithm:", algorithm)
+    print("Similarity:", similarity, "%")
+    print("Final Score:", score, "/ 100")
 
-print("Real Dataset Size:", len(real_code_dataset))
+    print("RESULT:", "ACCEPTED" if score >= 80 else "REJECTED")
 
-code = generate_code()
-
-if not code:
-    print("\nCode generation failed. Please run again.")
-    exit()
-
-print("\nGenerated Code:")
-print(code)
-
-result = discriminator(code)
-
-print("\nDISCRIMINATOR RESULT")
-print("-" * 45)
-
-print("Syntax:", result["syntax"])
-print("Functional:", result["functional"])
-print("Algorithm:", result["algorithm"])
-print("Similarity:", result["similarity"], "%")
-print("Final Score:", result["score"], "/ 100")
-
-if result["score"] >= 80:
-    print("\nRESULT: ACCEPTED")
 else:
-    print("\nRESULT: REJECTED")
+    print("Code generation failed. Please run again.")
